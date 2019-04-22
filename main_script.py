@@ -3,7 +3,7 @@
 """
 Created on Wed Apr 17 14:20:41 2019
 
-@author: Changjia
+@author: Changjia Cai
 """
 
 import numpy as np
@@ -20,6 +20,7 @@ import time
 from sklearn.linear_model import LinearRegression
 from scipy import stats
 from scipy import fftpack
+import cv2
 
 #%%
 # opts
@@ -35,7 +36,7 @@ opts = {'doCrossVal':False, #cross-validate to optimize regression regularizatio
         'globalAlign':True,
         'highPassRegression':False #regress on a high-passed version of the data. Slightly improves detection of spikes, but makes subthreshold unreliable.
        }
-output = {}
+output = {'rawROI':{}}
 
 
 #%%
@@ -135,28 +136,109 @@ reg = LinearRegression().fit(Vb.T,t)
 reg.coef_
 t = t - np.matmul(Vb.T,reg.coef_)
 
+# data, windowLength, sampleRate, doPlot, doClip = [-t, opts['windowLength'], sampleRate, True, 100]
+
+#%%
+# May need modification here
+Xspikes, spikeTimes, guessData, output['rawROI']['falsePosRate'], output['rawROI']['detectionRate'], output['rawROI']['templates'], low_spk = denoiseSpikes(-t, opts['windowLength'], sampleRate, True, 100)
+
+#%%
+Xspikes = -Xspikes
+output['rawROI']['X'] = t
+output['rawROI']['Xspikes'] = Xspikes
+output['rawROI']['spikeTimes'] = spikeTimes
+output['rawROI']['spatialFilter'] = bw
+output['rawROI']['X'] = output['rawROI']['X']*np.mean(t[output['rawROI']['spikeTimes']])/np.mean(output['rawROI']['X'][output['rawROI']['spikeTimes']]) # correct shrinkage
+
+selectSpikes = np.zeros(Xspikes.shape)
+selectSpikes[spikeTimes] = 1
+signal = np.mean(Xspikes[selectSpikes>0])
+noise = np.std(Xspikes[selectSpikes==0])
+snr = signal/noise
+
+# prebuild the regression matrix
+pred = 
+
+np.ones((1,data_pred.shape[1]))
+
+np.reshape(,data.shape)
+
+a = np.reshape(data_pred, (ref.shape[0], ref.shape[1], data.shape[1]), order='F')
+cv2.GaussianBlur(a, )
+
+Gaussian_kernel = Mat cv::getGaussianKernel(7, 1.5)
+
 #%% denoiseSpikes
-data, windowLength, sampleRate, doPlot, doClip = [-t, opts['windowLength'], sampleRate, True, 100]
-
-#%% highpass filter and threshold
-bb, aa = signal.butter(1, 1/(sampleRate/2), 'high') # 1Hz filter
-dataHP = signal.filtfilt(bb, aa, data).flatten()
-
-pks = dataHP[signal.find_peaks(dataHP, height=None)[0]]
-
-thresh, _, _, low_spk = getThresh(pks, doClip, 0.25)
-
-locs = signal.find_peaks(dataHP, height=thresh)[0]
-
-#%% peak-traiggered average
-window = np.int64(np.arange(-windowLength, windowLength+1, 1))
-locs = locs[np.logical_and(locs>(-window[0]), locs<(len(data)-window[-1]))]
-PTD = data[(locs[:,np.newaxis]+window)]
-PTA = np.mean(PTD, 0)
-
-# matched filter
-datafilt = whitenedMatchedFilter(data, locs, window)
-
+def denoiseSpikes(data, windowLength, sampleRate=500, doPlot=False, doClip=150):
+    #%% highpass filter and threshold
+    bb, aa = signal.butter(1, 1/(sampleRate/2), 'high') # 1Hz filter
+    dataHP = signal.filtfilt(bb, aa, data).flatten()
+    
+    pks = dataHP[signal.find_peaks(dataHP, height=None)[0]]
+    
+    thresh, _, _, low_spk = getThresh(pks, doClip, 0.25)
+    
+    locs = signal.find_peaks(dataHP, height=thresh)[0]
+    
+    #%% peak-traiggered average
+    window = np.int64(np.arange(-windowLength, windowLength+1, 1))
+    locs = locs[np.logical_and(locs>(-window[0]), locs<(len(data)-window[-1]))]
+    PTD = data[(locs[:,np.newaxis]+window)]
+    PTA = np.mean(PTD, 0)
+    
+    # matched filter
+    datafilt = whitenedMatchedFilter(data, locs, window)
+    
+    #%% spikes detected after filter
+    pks2 = datafilt[signal.find_peaks(datafilt, height=None)[0]]
+    
+    thresh2, falsePosRate, detectionRate, _ = getThresh(pks2, doClip, 0.5)
+    spikeTimes = signal.find_peaks(datafilt, height=thresh2)[0]
+    
+    guessData = np.zeros(data.shape)
+    guessData[spikeTimes] = 1
+    guessData = np.convolve(guessData, PTA, 'same')
+    
+    # filtering shrinks the data;
+    # rescale so that the mean value at the peaks is same as in the input
+    datafilt = datafilt * np.mean(data[spikeTimes]) / np.mean(datafilt[spikeTimes])
+    
+    # output templates
+    templates = PTA
+    
+    #%% plot three graphs
+    if doPlot:
+       
+       fig = plt.figure()
+       ax1 = fig.add_subplot(2,1,1)
+       ax1.hist(pks, 500)
+       ax1.axvline(x=thresh, c='r')
+       ax1.set_title('raw data')
+       ax2 = fig.add_subplot(2,1,2)
+       ax2.hist(pks2, 500)
+       ax2.axvline(x=thresh2, c='r')
+       ax2.set_title('after matched filter')
+       plt.tight_layout()
+       plt.show()
+       
+       fig = plt.plot()
+       plt.plot(np.transpose(PTD), c=[0.5,0.5,0.5])
+       plt.plot(PTA, c='black', linewidth=2)
+       plt.title('Peak-triggered average')
+       plt.show()
+       
+       fig = plt.figure()
+       ax1 = fig.add_subplot(2,1,1)
+       ax1.plot(data)
+       ax1.plot(locs, np.max(datafilt)*1.1*np.ones(locs.shape), color='r', marker='o', fillstyle='none', linestyle='none')
+       ax1.plot(spikeTimes, np.max(datafilt)*1*np.ones(spikeTimes.shape), color='g', marker='o', fillstyle='none', linestyle='none')
+       ax2 = fig.add_subplot(2,1,2)
+       ax2.plot(datafilt)
+       ax2.plot(locs, np.max(datafilt)*1.1*np.ones(locs.shape), color='r', marker='o', fillstyle='none', linestyle='none')
+       ax2.plot(spikeTimes, np.max(datafilt)*1*np.ones(spikeTimes.shape), color='g', marker='o', fillstyle='none', linestyle='none')
+       plt.show()     
+    return datafilt, spikeTimes, guessData, falsePosRate, detectionRate, templates, low_spk
+  
 #%% Get threshold
 #g = scipy.io.loadmat('/home/nel/Code/Voltage_imaging/pks.mat')
 #pks = g['pks']
@@ -220,7 +302,7 @@ def whitenedMatchedFilter(data, locs, window):
     censor = (censor<0.5)
     
     noise = data[censor]
-    _,pxx = signal.welch(noise, nperseg=1000, nfft=N)
+    _,pxx = signal.welch(noise, fs=2*np.pi,window=signal.get_window('hamming',1000),nfft=N, detrend=False)
     Nf2 = np.concatenate([pxx,np.flipud(pxx[:-1])])
     scaling = 1 / np.sqrt(Nf2)
     
