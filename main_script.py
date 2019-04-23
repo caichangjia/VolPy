@@ -21,7 +21,7 @@ from sklearn.linear_model import LinearRegression
 from scipy import stats
 from scipy import fftpack
 import cv2
-
+from scipy import ndimage
 #%%
 # opts
 opts = {'doCrossVal':False, #cross-validate to optimize regression regularization parameters?
@@ -45,7 +45,9 @@ fns = {1:'datasetblock1.mat'}
 rois_path = '/home/nel/Code/Voltage_imaging/exampledata/ROIs/403106_3min_rois.mat'
 fn_ix = 1
 cellN = 0
+iteration = 1
 #%%
+# too slow, need refined
 print('Loading data batch: ', fns[fn_ix])
 arrays = {}
 f = h5py.File(dr+'/'+fns[fn_ix],'r')
@@ -152,21 +154,144 @@ output['rawROI']['X'] = output['rawROI']['X']*np.mean(t[output['rawROI']['spikeT
 
 selectSpikes = np.zeros(Xspikes.shape)
 selectSpikes[spikeTimes] = 1
-signal = np.mean(Xspikes[selectSpikes>0])
+sgn = np.mean(Xspikes[selectSpikes>0])
 noise = np.std(Xspikes[selectSpikes==0])
-snr = signal/noise
+snr = sgn/noise
 
-# prebuild the regression matrix
-pred = 
+#%% prebuild the regression matrix
+# generate a predictor for ridge regression
+pred = np.transpose(np.vstack((np.ones((1,data_pred.shape[1])), np.reshape(ndimage.gaussian_filter(np.reshape(data_pred, (ref.shape[0], ref.shape[1], data.shape[1]), order='F'), sigma=(1.5,1.5,0), truncate=2, mode='nearest'),data.shape, order='F'))))
 
-np.ones((1,data_pred.shape[1]))
+#%% To do: if not enough spikes, take spatial filter from previous block
 
-np.reshape(,data.shape)
+#%% Cross-validation of regularized regression parameters
+lambdamax = np.linalg.norm(pred[1:,:], ord='fro') ** 2
+lambdas = lambdamax * np.logspace(-4, -2, 3)
+I0 = np.eye(pred.shape[1])
+I0[0,0] = 0
 
-a = np.reshape(data_pred, (ref.shape[0], ref.shape[1], data.shape[1]), order='F')
-cv2.GaussianBlur(a, )
+if opts['doCrossVal']:
+    # need to add
+    print('doing cross validation')
+else:
+    s_max = 1
+    l_max = 2
+    opts['lambda'] = lambdas[l_max]
+    opts['sigma'] = opts['sigmas'][s_max]
+    opts['lambda_ix'] = l_max
+    
+selectPred = np.ones(data.shape[1])
+if opts['highPassRegression']:
+    selectPred[:np.int16(sampleRate/2+1)] = 0
+    selectPred[-1-np.int16(sampleRate/2):] = 0
 
-Gaussian_kernel = Mat cv::getGaussianKernel(7, 1.5)
+sigma = opts['sigmas'][s_max]
+
+
+pred = np.transpose(np.vstack((np.ones((1,data_pred.shape[1])), np.reshape(ndimage.gaussian_filter(np.reshape(data_pred, (ref.shape[0], ref.shape[1], data.shape[1]), order='F'), sigma=(sigma,sigma,0), truncate=np.ceil((2*sigma-0.5)/sigma), mode='nearest'),data.shape, order='F'))))
+recon = np.transpose(np.vstack((np.ones((1,data_hp.shape[1])), np.reshape(ndimage.gaussian_filter(np.reshape(data_hp, (ref.shape[0], ref.shape[1], data.shape[1]), order='F'), sigma=(sigma,sigma,0), truncate=np.ceil((2*sigma-0.5)/sigma), mode='nearest'),data.shape, order='F'))))
+temp = np.linalg.inv(np.matmul(np.transpose(pred[selectPred>0,:]), pred[selectPred>0,:]) + lambdas[l_max] * I0)
+kk = np.matmul(temp, np.transpose(pred[selectPred>0,:]))
+
+# Matrix multiplication and matrix inverse too slow
+# Need to be modified
+'''
+tic = time.time()
+elapse = time.time() - tic
+np.linalg.inv(np.matmul(np.transpose(pred[selectPred>0,:]), pred[selectPred>0,:]) + lambdas[l_max] * I0)
+kk = np.matmul(temp, np.transpose(pred[selectPred>0,:]))
+tic = time.time()
+np.matmul(np.transpose(pred[selectPred>0,:]), pred[selectPred>0,:])
+elapse = time.time() - tic
+'''
+
+#%% Identify spatial filters with regularized regression
+doPlot = False
+if iteration == opts['nIter']:
+    doPlot = True
+    
+print('Identifying spatial filters')
+gD = guessData[selectPred>0]
+select = (gD!=0)
+weights = np.matmul(kk[:,select], gD[select])
+
+X = np.double(np.matmul(recon, weights))
+X = X - np.mean(X)
+
+a=np.reshape(weights[1:], ref.shape, order='F')
+
+spatialFilter = ndimage.gaussian_filter(a, sigma=(sigma,sigma), truncate=np.ceil((2*sigma-0.5)/sigma), mode='nearest')
+plt.imshow(spatialFilter)
+plt.show()
+
+if iteration < opts['nIter']:
+    b = LinearRegression().fit(Vb.T,X).coef_
+    if doPlot:
+        plt.figure()
+        plt.plot(X)
+        plt.plot(np.matmul(Vb.T,b))
+        plt.title('Denoised trace vs background')
+        plt.show()
+    X = X - np.matmul(Vb.T,b)
+else:
+    if opts['doGlobalSubtract']:
+        print('do global subtract')
+        # need to add
+        
+# correct shrinkage
+X = X * np.mean(t[spikeTimes]) / np.mean(X[spikeTimes])
+
+# generate the new trace and the new denoised trace
+Xspikes, spikeTimes, guessData, falsePosRate, detectionRate, templates, _ = denoiseSpikes(-X, opts['windowLength'], sampleRate, doPlot)
+selectSpikes = np.zeros(Xspikes.shape)
+selectSpikes[spikeTimes] = 1
+sgn = np.mean(Xspikes[selectSpikes>0])
+noise = np.std(Xspikes[selectSpikes==0])
+snr = sgn/noise
+
+#%% ensure that the maximum of the spatial filter is within the ROI
+matrix = np.matmul(np.transpose(pred[:, 1:]), -guessData)  
+sigmax = np.sqrt(np.sum(np.multiply(pred[:, 1:], pred[:, 1:]), axis=0))
+sigmay = np.sqrt(np.dot(guessData, guessData))
+IMcorr = matrix/sigmax/sigmay
+maxCorrInROI = np.max(IMcorr[bw.T.ravel()])
+if np.any(IMcorr[notbw.ravel()]>maxCorrInROI):
+    output['passedLocalityTest'] = False
+else:
+    output['passedLocalityTest'] = True
+    
+#%% compute SNR
+selectSpikes = np.zeros(Xspikes.shape)
+selectSpikes[spikeTimes] = 1
+sgn = np.mean(Xspikes[selectSpikes>0])
+noise = np.std(Xspikes[selectSpikes==0])
+snr = sgn/noise
+output['snr'] = snr
+
+
+#%% output
+output['y'] = X
+output['yFilt'] = -Xspikes
+output['ROI'] = np.transpose(np.vstack((Xinds[[0,-1]], Yinds[[0,-1]])))
+output['ROIbw'] = bw
+output['spatialFilter'] = spatialFilter
+output['falsePosRate'] = falsePosRate
+output['detectionRate'] = detectionRate
+output['templates'] = templates
+output['spikeTimes'] = spikeTimes
+output['opts'] = opts
+output['F0'] = np.nanmean(np.double(data_lp[bw.T.flatten(), :]) + output['meanIM'][bw][:,np.newaxis], 0) 
+output['dFF'] = X / output['F0']
+output['rawROI']['dFF'] = output['rawROI']['X'] / output['F0']
+output['Vb'] = Vb    # background components
+output['low_spk'] = low_spk
+
+#%% save
+
+
+
+
+
 
 #%% denoiseSpikes
 def denoiseSpikes(data, windowLength, sampleRate=500, doPlot=False, doClip=150):
