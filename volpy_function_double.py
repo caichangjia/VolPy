@@ -1,13 +1,11 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-Created on Fri Apr 19 14:50:09 2019
+Created on Mon May  6 09:42:51 2019
 
-@author: Changjia Cai
+@author: Changjia
 """
-import os
-os.environ["MKL_NUM_THREADS"] = "12" 
-os.environ["OPENBLAS_NUM_THREADS"] = "12"
+
 import numpy as np
 from scipy import stats
 from scipy import signal
@@ -35,8 +33,7 @@ import caiman as cm
 def spikePursuit_parallel(pars):
     # opts
     tic_total = time.time()    
-    tic1 = time.time()
-    #tic = time.time()    
+    tic1 = time.time() 
     opts = {'doCrossVal':False, #cross-validate to optimize regression regularization parameters?
             'doGlobalSubtract':False,
             'contextSize':50,  #65; #number of pixels surrounding the ROI to use as context
@@ -102,12 +99,9 @@ def spikePursuit_parallel(pars):
     #%%
     output['meanIM'] = np.mean(data, axis=0)
     data = np.reshape(data, (data.shape[0],-1))  
-    #data = np.double(data)
-    #data = np.double(data-np.mean(data,0))
-    #data = np.double(data-np.mean(data,0))  
-    
-    data = data-np.mean(data,0)
-    data = data-np.mean(data,0)
+    data = np.double(data)
+    data = np.double(data-np.mean(data,0))
+    data = np.double(data-np.mean(data,0))  
   
     #%% remove low frequency components    
     data_hp = highpassVideo(data.T, 1/opts['tau_lp'], sampleRate).T
@@ -119,13 +113,13 @@ def spikePursuit_parallel(pars):
         data_pred = data_hp    
  
     #%%
-    t = np.nanmean(data_hp[:,bw.ravel()],1)
+    t = np.nanmean(np.double(data_hp[:,bw.ravel()]),1)
     t = t-np.mean(t)
     #plt.plot(t[0:200])        
     #%% remove any variance in trace that can be predicted from the background PCs
-    Ub, Sb, Vb = svds(data_hp[:,notbw.ravel()], opts['nPC_bg'])
+    Ub, Sb, Vb = svds(np.double(data_hp[:,notbw.ravel()]), opts['nPC_bg'])
     reg = LinearRegression(fit_intercept=False).fit(Ub,t)
-    t = np.double(t - np.matmul(Ub,reg.coef_))
+    t = t - np.matmul(Ub,reg.coef_)
     
     #elapse = time.time() - tic
     #print('Cell',cellN,'Use', elapse, 's','for process 1')
@@ -133,10 +127,6 @@ def spikePursuit_parallel(pars):
     elapse1 = time.time() - tic1
     print('Cell',cellN,'Use', elapse1, 's','for process1')    
     output['time']['process1'] = elapse1
-    
-
-
-
     
     tic2 = time.time()
     # data, windowLength, sampleRate, doPlot, doClip = [-t, opts['windowLength'], sampleRate, True, 100]
@@ -161,18 +151,18 @@ def spikePursuit_parallel(pars):
     
     #%% prebuild the regression matrix
     # generate a predictor for ridge regression
-    pred = np.hstack((np.ones((data_pred.shape[0], 1), dtype=np.single), np.reshape
-                      (movie.gaussian_blur_2D(np.reshape(data_pred, 
-                      (data_hp.shape[0], ref.shape[0], ref.shape[1])),
-                      kernel_size_x=7, kernel_size_y=7,kernel_std_x=1.5, 
-                      kernel_std_y=1.5, borderType=cv2.BORDER_REPLICATE),data_hp.shape)))
+    pred = np.hstack((np.ones((data_pred.shape[0], 1)), np.reshape
+                     (movie.gaussian_blur_2D(np.reshape(data_pred, 
+                       (data_hp.shape[0], ref.shape[0], ref.shape[1])),
+                       kernel_size_x=7, kernel_size_y=7,kernel_std_x=1.5, 
+                       kernel_std_y=1.5, borderType=cv2.BORDER_REPLICATE),data_hp.shape)))
      
 
     #%% To do: if not enough spikes, take spatial filter from previous block
     #%% Cross-validation of regularized regression parameters
-    lambdamax = np.single(np.linalg.norm(pred[:,1:], ord='fro') ** 2)
+    lambdamax = np.linalg.norm(pred[:,1:], ord='fro') ** 2
     lambdas = lambdamax * np.logspace(-4, -2, 3)
-    I0 = np.eye(pred.shape[1], dtype=np.single)
+    I0 = np.eye(pred.shape[1])
     I0[0,0] = 0
     
     if opts['doCrossVal']:
@@ -192,7 +182,7 @@ def spikePursuit_parallel(pars):
     
     sigma = opts['sigmas'][s_max]         
     
-    pred = np.hstack((np.ones((data_pred.shape[0], 1),dtype=np.single), np.reshape
+    pred = np.hstack((np.ones((data_pred.shape[0], 1)), np.reshape
                      (movie.gaussian_blur_2D(np.reshape(data_pred, 
                        (data_hp.shape[0], ref.shape[0], ref.shape[1])),
                        kernel_size_x=np.int(2*np.ceil(2*sigma)+1), 
@@ -200,7 +190,7 @@ def spikePursuit_parallel(pars):
                        kernel_std_x=sigma, kernel_std_y=sigma, 
                        borderType=cv2.BORDER_REPLICATE),data_hp.shape)))
         
-    recon = np.hstack((np.ones((data_hp.shape[0], 1),dtype=np.single), np.reshape
+    recon = np.hstack((np.ones((data_hp.shape[0], 1)), np.reshape
                      (movie.gaussian_blur_2D(np.reshape(data_hp, 
                        (data_hp.shape[0], ref.shape[0], ref.shape[1])),
                        kernel_size_x=np.int(2*np.ceil(2*sigma)+1), 
@@ -217,7 +207,6 @@ def spikePursuit_parallel(pars):
     output['time']['process2'] = elapse2
         
     tic3 = time.time()
-        
 
     #%% Identify spatial filters with regularized regression
     for iteration in range(opts['nIter']):
@@ -228,11 +217,11 @@ def spikePursuit_parallel(pars):
         #print('Identifying spatial filters')
         #print(iteration)
                     
-        gD = np.single(guessData[selectPred>0])
+        gD = guessData[selectPred>0]
         select = (gD!=0)
         weights = np.matmul(kk[:,select], gD[select])
                    
-        X = np.matmul(recon, weights)
+        X = np.double(np.matmul(recon, weights))
         X = X - np.mean(X)
         
         a=np.reshape(weights[1:], ref.shape, order='C')            
@@ -263,7 +252,7 @@ def spikePursuit_parallel(pars):
                 
         # correct shrinkage
         
-        X = np.double(X * np.mean(t[spikeTimes]) / np.mean(X[spikeTimes]))
+        X = X * np.mean(t[spikeTimes]) / np.mean(X[spikeTimes])
         
         # generate the new trace and the new denoised trace
         Xspikes, spikeTimes, guessData, falsePosRate, detectionRate, templates, _ = denoiseSpikes(-X, opts['windowLength'], sampleRate, doPlot)
@@ -305,7 +294,7 @@ def spikePursuit_parallel(pars):
     output['templates'] = templates
     output['spikeTimes'] = spikeTimes
     output['opts'] = opts
-    output['F0'] = np.nanmean(data_lp[:,bw.flatten()] + output['meanIM'][bw][np.newaxis,:], 1) 
+    output['F0'] = np.nanmean(np.double(data_lp[:,bw.flatten()]) + output['meanIM'][bw][np.newaxis,:], 1) 
     output['dFF'] = X / output['F0']
     output['rawROI']['dFF'] = output['rawROI']['X'] / output['F0']
     output['Vb'] = Vb    # background components
@@ -319,8 +308,7 @@ def spikePursuit_parallel(pars):
     
     elapse_total = time.time() - tic_total
     print('Use', elapse_total, 's IN TOTAL')
-    output['time']['total'] = elapse_total    
-    output['time']['cellN'] = cellN
+    output['time']['total'] = elapse_total  
     
     
     return output
@@ -493,7 +481,7 @@ def whitenedMatchedFilter(data, locs, window):
 def highpassVideo(video, freq, sampleRate):
     normFreq = freq/(sampleRate/2)
     b, a = signal.butter(3, normFreq, 'high')
-    videoFilt = np.single(signal.filtfilt(b, a, video, padtype = 'odd', padlen=3*(max(len(b),len(a))-1)))
+    videoFilt = signal.filtfilt(b, a, video, padtype = 'odd', padlen=3*(max(len(b),len(a))-1))
     return videoFilt
 
 
@@ -579,6 +567,7 @@ def denoiseSpikes1(data, windowLength, sampleRate=500, doPlot=False, doClip=150)
        plt.plot(np.arange(lb,ub),datafilt[lb:ub])
       # plt.plot(spikeTimes1[np.logical_and(spikeTimes1>lb,spikeTimes1<ub)], np.max(datafilt)*1*np.ones(spikeTimes[np.logical_and(spikeTimes1>lb,spikeTimes1<ub)].shape), color='g', marker='o', fillstyle='none', linestyle='none')        
        plt.plot(spikeTimes[np.logical_and(spikeTimes>lb,spikeTimes<ub)], np.max(datafilt)*1.3*np.ones(spikeTimes[np.logical_and(spikeTimes>lb,spikeTimes<ub)].shape), color='b', marker='o', fillstyle='none', linestyle='none')        
+       
        plt.show()
     return datafilt, spikeTimes, guessData, falsePosRate, detectionRate, templates, low_spk
 

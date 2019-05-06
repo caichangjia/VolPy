@@ -6,7 +6,8 @@ Created on Wed May  1 15:14:37 2019
 @author: Changjia Cai
 """
 import os
-os.environ["MKL_NUM_THREADS"] = "8" 
+os.environ["MKL_NUM_THREADS"] = "1" 
+os.environ["OPENBLAS_NUM_THREADS"] = "1"
 import sys
 sys.path.append('/home/nel/Code/VolPy')
 
@@ -27,6 +28,117 @@ import cv2
 import caiman as cm
 from volpy_function import *
 import multiprocessing as mp
+from caiman.base.movies import movie
+
+
+
+#%%
+rois_path = '/home/nel/Code/Voltage_imaging/exampledata/ROIs/403106_3min_rois.mat'
+f = io.loadmat(rois_path)
+ROIs = f['roi'].T
+sampleRate = 400
+
+#fname_new = '/home/nel/Code/Voltage_imaging/exampledata/403106_3min/memmap__d1_512_d2_128_d3_1_order_C_frames_36000_.mmap'
+
+fname_new = '/media/nel/ssd/data/memmap__d1_512_d2_128_d3_1_order_C_frames_36000_.mmap'
+args = []
+
+for i in range(6):
+    args.append([fname_new, i, ROIs[i,:,:]])
+
+#pars = args[3]
+
+c, dview, n_processes = cm.cluster.setup_cluster(
+    backend='local', n_processes=6, single_thread=False)
+
+results = dview.map_async(spikePursuit_parallel, args).get()
+dview.close()
+
+#results = spikePursuit_parallel(args[0])
+#df_single_1 = results
+df_double_6 = results
+#df_single_6 = results
+#df_single_12 = results
+
+
+#%%
+d6 = [i['time'] for i in df_double_6]
+s1 = df_single_1['time']
+s6 = [i['time'] for i in df_single_6]
+s12 = [i['time'] for i in df_single_12]
+
+d6 = sorted(d6, key=lambda x: x['total'], reverse=True)[0]
+s6 = sorted(s6, key=lambda x: x['total'], reverse=True)[0]
+s12 = sorted(s12, key=lambda x: x['total'], reverse=True)[0]
+
+l = [d6, s1, s6, s12]
+
+N = 4
+p1 = [i['process1'] for i in l]
+p2 = [i['process2'] for i in l]
+p3 = [i['process3'] for i in l]
+ind = np.arange(N)    # the x locations for the groups
+width = 0.35       # the width of the bars: can also be len(x) sequence
+
+f1 = plt.bar(ind, p1, width)
+f2 = plt.bar(ind, p2, width,
+             bottom=p1)
+f3 = plt.bar(ind, p3, width, bottom=[a + b for a, b in zip(p1, p2)])
+
+plt.ylabel('Total Time')
+plt.title('Total time by different cpu and number of cells')
+plt.xticks(ind, ('double_6', 'single_1', 'single_6', 'single_12'))
+plt.legend(('Process1', 'Process2', 'Process3'))
+
+plt.savefig('Total time vs CPU and number of cells.jpg')
+
+
+
+#%%
+d6 = [i['time'] for i in df_double_6]
+s1 = df_single_1['time']
+s6 = [i['time'] for i in df_single_6]
+s12 = [i['time'] for i in df_single_12]
+
+d6 = sorted(d6, key=lambda x: x['total'], reverse=True)[0]
+s6 = sorted(s6, key=lambda x: x['total'], reverse=True)[0]
+s12 = sorted(s12, key=lambda x: x['total'], reverse=True)[0]
+
+d6 = {k:v/6 for k, v in d6.items()}
+s6 = {k:v/6 for k, v in s6.items()}
+s12 = {k:v/12 for k, v in s12.items()}
+
+
+l = [d6, s1, s6, s12]
+
+N = 4
+p1 = [i['process1'] for i in l]
+p2 = [i['process2'] for i in l]
+p3 = [i['process3'] for i in l]
+ind = np.arange(N)    # the x locations for the groups
+width = 0.35       # the width of the bars: can also be len(x) sequence
+
+f1 = plt.bar(ind, p1, width)
+f2 = plt.bar(ind, p2, width,
+             bottom=p1)
+f3 = plt.bar(ind, p3, width, bottom=[a + b for a, b in zip(p1, p2)])
+
+plt.ylabel('Average time')
+plt.title('Average time by different cpu and number of cells')
+plt.xticks(ind, ('double_6', 'single_1', 'single_6', 'single_12'))
+plt.legend(('Process1', 'Process2', 'Process3'))
+
+plt.savefig('Average time vs CPU and number of cells.jpg')
+plt.show()
+
+
+
+
+#%%
+tic_total = time.time()
+results = spikePursuit_parallel(args[0])
+elapse = time.time() - tic_total
+print('Use', elapse, 's IN TOTAL')
 
 #%%
 cellN = 0
@@ -73,45 +185,11 @@ sampleRate = sampleRate[0][0]
 print('sampleRate:',np.int(sampleRate))
 '''
 
-rois_path = '/home/nel/Code/Voltage_imaging/exampledata/ROIs/403106_3min_rois.mat'
-f = io.loadmat(rois_path)
-ROIs = f['roi'].T
-sampleRate = 400
-
-fname_new = '/home/nel/Code/Voltage_imaging/exampledata/403106_3min/memmap__d1_512_d2_128_d3_1_order_C_frames_36000_.mmap'
-
-arguments = []
-
-for i in range(3):
-    arguments.append([fname_new, i, ROIs[i,:,:]])
-    
-
-try:
-    c, dview, n_processes = cm.cluster.setup_cluster(
-        backend='local', n_processes=8, single_thread=False)
-    results = dview.map_async(spikePursuit_parallel, arguments).get()
-    dview.close()
-
-except Exception as e:
-   dview.close()
-dview.close()
-    
-
-dview = mp.Pool(4)
-
-for cellN in range(3):
-    results = dview.apply_async(spikePursuit_parallel, args=arguments).get()
-    
-dview.close()
-dview.join()
-
-dview.terminate()
-
-
-
 #%%
+@profile
 def spikePursuit_parallel(pars):
     # opts
+    
     opts = {'doCrossVal':False, #cross-validate to optimize regression regularization parameters?
             'doGlobalSubtract':False,
             'contextSize':50,  #65; #number of pixels surrounding the ROI to use as context
@@ -151,8 +229,14 @@ def spikePursuit_parallel(pars):
     bw = bw[Xinds[0]:Xinds[-1]+1, Yinds[0]:Yinds[-1]+1]
     #notbw = 1-dilation(bw, disk_matrix)
     notbw = 1-dilation(bw, disk(opts['censorSize']))   
+    
+    tic = time.time()    
         
     data = np.array(images[:, Xinds[0]:Xinds[-1]+1, Yinds[0]:Yinds[-1]+1])
+    
+    elapse = time.time() - tic
+    print('Use', elapse, 's')
+    
     bw = (bw>0)
     notbw = (notbw>0)
     
@@ -193,12 +277,14 @@ def spikePursuit_parallel(pars):
     reg = LinearRegression(fit_intercept=False).fit(Ub,t)
     t = t - np.matmul(Ub,reg.coef_)
   
-    
+   
+
     # data, windowLength, sampleRate, doPlot, doClip = [-t, opts['windowLength'], sampleRate, True, 100]
     
     #%%
     # May need modification here
-    Xspikes, spikeTimes, guessData, output['rawROI']['falsePosRate'], output['rawROI']['detectionRate'], output['rawROI']['templates'], low_spk = denoiseSpikes(-t, opts['windowLength'], sampleRate, False, 100)
+    tic = time.time()
+    Xspikes, spikeTimes, guessData, output['rawROI']['falsePosRate'], output['rawROI']['detectionRate'], output['rawROI']['templates'], low_spk = denoiseSpikes(-t, opts['windowLength'], sampleRate, True, 100)
     
     #%%
     Xspikes = -Xspikes
@@ -216,11 +302,12 @@ def spikePursuit_parallel(pars):
     
     #%% prebuild the regression matrix
     # generate a predictor for ridge regression
-        
     pred = np.hstack((np.ones((data_pred.shape[0], 1)), np.reshape
-                      (ndimage.gaussian_filter(np.reshape(data_pred, 
-                        (data_hp.shape[0], ref.shape[0], ref.shape[1])),
-                        sigma=(0,1.5,1.5), truncate=2, mode='nearest'),data_hp.shape)))
+                     (movie.gaussian_blur_2D(np.reshape(data_pred, 
+                       (data_hp.shape[0], ref.shape[0], ref.shape[1])),
+                       kernel_size_x=7, kernel_size_y=7,kernel_std_x=1.5, 
+                       kernel_std_y=1.5, borderType=cv2.BORDER_REPLICATE),data_hp.shape)))
+     
 
     #%% To do: if not enough spikes, take spatial filter from previous block
     #%% Cross-validation of regularized regression parameters
@@ -245,12 +332,31 @@ def spikePursuit_parallel(pars):
         selectPred[-1-np.int16(sampleRate/2):] = 0
     
     sigma = opts['sigmas'][s_max]         
-    pred = np.hstack((np.ones((data_pred.shape[0],1)), np.reshape(ndimage.gaussian_filter(np.reshape(data_pred, (data_hp.shape[0], ref.shape[0], ref.shape[1])), sigma=(0,sigma,sigma), truncate=np.ceil((2*sigma-0.5)/sigma), mode='nearest'),data_hp.shape)))
-    recon = np.hstack((np.ones((data_hp.shape[0],1)), np.reshape(ndimage.gaussian_filter(np.reshape(data_hp, (data_hp.shape[0], ref.shape[0], ref.shape[1])), sigma=(0,sigma,sigma), truncate=np.ceil((2*sigma-0.5)/sigma), mode='nearest'),data_hp.shape)))
+    
+    pred = np.hstack((np.ones((data_pred.shape[0], 1)), np.reshape
+                     (movie.gaussian_blur_2D(np.reshape(data_pred, 
+                       (data_hp.shape[0], ref.shape[0], ref.shape[1])),
+                       kernel_size_x=np.int(2*np.ceil(2*sigma)+1), 
+                       kernel_size_y=np.int(2*np.ceil(2*sigma)+1),
+                       kernel_std_x=sigma, kernel_std_y=sigma, 
+                       borderType=cv2.BORDER_REPLICATE),data_hp.shape)))
+        
+    recon = np.hstack((np.ones((data_hp.shape[0], 1)), np.reshape
+                     (movie.gaussian_blur_2D(np.reshape(data_hp, 
+                       (data_hp.shape[0], ref.shape[0], ref.shape[1])),
+                       kernel_size_x=np.int(2*np.ceil(2*sigma)+1), 
+                       kernel_size_y=np.int(2*np.ceil(2*sigma)+1),
+                       kernel_std_x=sigma, kernel_std_y=sigma, 
+                       borderType=cv2.BORDER_REPLICATE),data_hp.shape)))
+       
     temp = np.linalg.inv(np.matmul(np.transpose(pred[selectPred>0,:]), pred[selectPred>0,:]) + lambdas[l_max] * I0)
     kk = np.matmul(temp, np.transpose(pred[selectPred>0,:]))
+    elapse = time.time() - tic
+    print('Use', elapse, 's')
+
 
     #%% Identify spatial filters with regularized regression
+    tic = time.time()
     for iteration in range(opts['nIter']):
         doPlot = False
         if iteration == opts['nIter'] - 1:
@@ -267,7 +373,13 @@ def spikePursuit_parallel(pars):
         X = X - np.mean(X)
         
         a=np.reshape(weights[1:], ref.shape, order='C')            
-        spatialFilter = ndimage.gaussian_filter(a, sigma=(sigma,sigma), truncate=np.ceil((2*sigma-0.5)/sigma), mode='nearest')
+        spatialFilter = movie.gaussian_blur_2D(a[np.newaxis,:,:],
+                       kernel_size_x=np.int(2*np.ceil(2*sigma)+1), 
+                       kernel_size_y=np.int(2*np.ceil(2*sigma)+1),
+                       kernel_std_x=sigma, kernel_std_y=sigma, 
+                       borderType=cv2.BORDER_REPLICATE)[0]
+        
+        
         #plt.imshow(spatialFilter)
         #plt.show()
         
@@ -335,6 +447,9 @@ def spikePursuit_parallel(pars):
     output['rawROI']['dFF'] = output['rawROI']['X'] / output['F0']
     output['Vb'] = Vb    # background components
     output['low_spk'] = low_spk
+    elapse = time.time() - tic
+    print('Use', elapse, 's')
+
     
     return output
         
