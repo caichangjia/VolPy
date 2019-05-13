@@ -351,8 +351,8 @@ def denoiseSpikes(data, windowLength, sampleRate=500, doPlot=True, doClip=150):
     PTA = np.mean(PTD, 0)
 
     # matched filter
-    #datafilt = whitenedMatchedFilter(data, locs, window)
-    datafilt = data
+    datafilt = whitenedMatchedFilter(data, locs, window)
+    #datafilt = data
     
     # spikes detected after filter
     pks2 = datafilt[signal.find_peaks(datafilt, height=None)[0]]
@@ -467,14 +467,15 @@ def getThresh(pks, doClip, pnorm=0.5):
 
 #%% whitened Matched Filter
 def whitenedMatchedFilter(data, locs, window):
-    N = 2 * len(data) - 1
+    N = 2 * len(data) 
     censor = np.zeros(len(data))
     censor[locs] = 1
     censor = np.int16(np.convolve(censor.flatten(), np.ones([1, len(window)]).flatten(), 'same'))
     censor = (censor<0.5)    
     noise = data[censor]
-    #_,pxx = signal.welch(noise, fs=2*np.pi,window=signal.get_window('hamming',1000),nfft=N, detrend=False)
-    _, pxx = signal.periodogram(noise, fs=2*np.pi,nfft=N, detrend=False)
+    _,pxx = signal.welch(noise,fs=400,window=signal.get_window('hamming',1000),nfft=N, detrend=False, nperseg=1000)
+    
+    #_, pxx = signal.periodogram(noise, fs=2*np.pi,nfft=2000, detrend=False)
     #window=signal.get_window('hamming',1000),
     Nf2 = np.concatenate([pxx,np.flipud(pxx[:-1])])
     scaling = 1 / np.sqrt(Nf2)
@@ -482,12 +483,11 @@ def whitenedMatchedFilter(data, locs, window):
     # Use pyfftw
     a = pyfftw.empty_aligned(data.shape[0], dtype='float64')
     a[:] = data
-    dataScaled = np.real(pyfftw.interfaces.scipy_fftpack.ifft(pyfftw.interfaces.scipy_fftpack.fft(a,N) * scaling))
+    dataScaled = np.real(pyfftw.interfaces.scipy_fftpack.ifft(pyfftw.interfaces.scipy_fftpack.fft(a,N+1) * scaling))
     PTDscaled = dataScaled[(locs[:,np.newaxis]+window)]
     PTAscaled = np.mean(PTDscaled, 0)
     datafilt = np.convolve(dataScaled, np.flipud(PTAscaled), 'same')
     datafilt = datafilt[:len(data)] 
-    
     return datafilt    
 #%%
 def highpassVideo(video, freq, sampleRate):
