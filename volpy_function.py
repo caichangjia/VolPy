@@ -63,9 +63,7 @@ def spikePursuit_parallel(pars):
     # To do
     #%%
     fname_new, cellN, bw = pars
-    print('processing cell:', cellN)  
-
-    
+    print('processing cell:', cellN)      
         
     Yr, dims, T = cm.load_memmap(fname_new)
     images = np.reshape(Yr.T, [T] + list(dims), order='F')
@@ -105,7 +103,6 @@ def spikePursuit_parallel(pars):
     #data = np.double(data)
     #data = np.double(data-np.mean(data,0))
     #data = np.double(data-np.mean(data,0))  
-    
     data = data-np.mean(data,0)
     data = data-np.mean(data,0)
   
@@ -467,23 +464,21 @@ def getThresh(pks, doClip, pnorm=0.5):
 
 #%% whitened Matched Filter
 def whitenedMatchedFilter(data, locs, window):
-    N = 2 * len(data) 
+    N = np.ceil(np.log2(len(data)))
     censor = np.zeros(len(data))
     censor[locs] = 1
     censor = np.int16(np.convolve(censor.flatten(), np.ones([1, len(window)]).flatten(), 'same'))
     censor = (censor<0.5)    
     noise = data[censor]
-    _,pxx = signal.welch(noise,fs=400,window=signal.get_window('hamming',1000),nfft=N, detrend=False, nperseg=1000)
+    _,pxx = signal.welch(noise, fs=1, window=signal.get_window('hamming',1000), nfft=2**N, detrend=False, nperseg=1000)
     
-    #_, pxx = signal.periodogram(noise, fs=2*np.pi,nfft=2000, detrend=False)
-    #window=signal.get_window('hamming',1000),
-    Nf2 = np.concatenate([pxx,np.flipud(pxx[:-1])])
+    Nf2 = np.concatenate([pxx,np.flipud(pxx[1:-1])])
     scaling = 1 / np.sqrt(Nf2)
     
     # Use pyfftw
     a = pyfftw.empty_aligned(data.shape[0], dtype='float64')
     a[:] = data
-    dataScaled = np.real(pyfftw.interfaces.scipy_fftpack.ifft(pyfftw.interfaces.scipy_fftpack.fft(a,N+1) * scaling))
+    dataScaled = np.real(pyfftw.interfaces.scipy_fftpack.ifft(pyfftw.interfaces.scipy_fftpack.fft(a,2**N) * scaling))
     PTDscaled = dataScaled[(locs[:,np.newaxis]+window)]
     PTAscaled = np.mean(PTDscaled, 0)
     datafilt = np.convolve(dataScaled, np.flipud(PTAscaled), 'same')
